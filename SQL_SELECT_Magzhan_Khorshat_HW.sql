@@ -133,6 +133,7 @@ INNER JOIN film_category fc
 ON f.film_id = fc.film_id
 INNER JOIN category c
 ON fc.category_id = c.category_id
+WHERE UPPER(c.name) IN ('ACTION', 'HORROR', 'COMEDY')
 GROUP BY  f.release_year
 ORDER BY f.release_year DESC;
 
@@ -147,6 +148,7 @@ LEFT JOIN film_category fc
 ON f.film_id = fc.film_id
 LEFT JOIN category c
 ON fc.category_id = c.category_id
+WHERE UPPER(c.name) IN ('ACTION', 'HORROR', 'COMEDY')
 GROUP BY  f.release_year
 ORDER BY f.release_year DESC;
 
@@ -158,7 +160,8 @@ WITH StaffRevenue AS
 (
 	SELECT  	s.store_id,
 	        	s.staff_id,
-	        	SUM(p.amount) AS highest_revenue_for_2017
+	        	SUM(p.amount) AS highest_revenue_for_2017,
+	        	s.first_name || ' ' || s.last_name AS staff_fullname
 	FROM staff s
 	INNER JOIN payment p
 	ON s.staff_id = p.staff_id
@@ -176,17 +179,21 @@ MaxRevenuePerStore AS
 	GROUP BY  sr.store_id
 )
 
-SELECT  sr.store_id,
+SELECT  sr.staff_fullname,
         sr.highest_revenue_for_2017,
-        sr.staff_id AS staff_id_who_deserves_a_bonus
+        a.address as store_address
 FROM StaffRevenue sr
 INNER JOIN MaxRevenuePerStore mrps
 ON sr.store_id = mrps.store_id AND sr.highest_revenue_for_2017 = mrps.max_revenue
-ORDER BY sr.store_id;
+INNER JOIN store s
+ON mrps.store_id = s.store_id 
+INNER JOIN address a 
+ON s.address_id = a.address_id 
+ORDER BY sr.staff_fullname;
 
 -- Second solution 
 
-WITH staff_revenue AS
+WITH StaffRevenue AS
 (
 	SELECT  s.staff_id,
 	        SUM(p.amount) AS amount
@@ -199,18 +206,23 @@ WITH staff_revenue AS
 
 s_revenue AS
 (
-	SELECT  s1.store_id
-	       ,s1.staff_id
-	       ,sr1.amount
+	SELECT  s1.store_id,
+	        s1.staff_id,
+	        s1.first_name || ' ' || s1.last_name as staff_fullname,
+	        sr1.amount
 	FROM staff s1
-	INNER JOIN staff_revenue sr1
+	INNER JOIN StaffRevenue sr1
 	ON s1.staff_id = sr1.staff_id
 )
 
-SELECT  sr.store_id,
+SELECT  sr.staff_fullname,
         sr.amount   AS highest_revenue_for_2017,
-        sr.staff_id AS staff_id_who_deserves_a_bonus
+        a.address as store_address
 FROM s_revenue sr
+INNER JOIN store s 
+ON sr.store_id = s.store_id 
+INNER JOIN address a 
+ON s.address_id = a.address_id 
 WHERE exists 
 	(
 		SELECT  	s_revenue.store_id,
