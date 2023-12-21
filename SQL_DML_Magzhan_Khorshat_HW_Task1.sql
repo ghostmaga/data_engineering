@@ -1,5 +1,9 @@
-﻿-- /*Choose your top-3 favorite movies AND add them to the 'film' table. Fill IN rental rates WITH 4.99, 9.99 AND 19.99 AND rental durations WITH 1, 2 AND 3 weeks respectively.*/
+﻿SET search_path TO public;
+
+--
+-- /*Choose your top-3 favorite movies AND add them to the 'film' table. Fill IN rental rates WITH 4.99, 9.99 AND 19.99 AND rental durations WITH 1, 2 AND 3 weeks respectively.*/
 -- 
+
 INSERT INTO film (title, description, release_year, language_id, rental_duration, rental_rate, length, replacement_cost, rating, special_features)
 SELECT  *
 FROM( 
@@ -110,10 +114,9 @@ SET first_name = 'MAGZHAN',
 	address_id = (	SELECT  address_id
 					FROM address
 					WHERE postal_code = '2299'
-					LIMIT 1), 
-	last_update = current_date
+					LIMIT 1)
 WHERE customer_id = (	
-					SELECT  customer_id
+					SELECT  cust_cond.customer_id
 					FROM	(
 								SELECT  c.customer_id
 								FROM customer c
@@ -124,8 +127,9 @@ WHERE customer_id = (
 								GROUP BY  c.customer_id
 								HAVING COUNT(r.rental_id) >= 43 AND COUNT(p.payment_id) >= 43
 								LIMIT 1
-							)
+							) AS cust_cond
 					) 
+AND NOT EXISTS (SELECT first_name, last_name FROM customer WHERE UPPER(first_name) = 'MAGZHAN' AND UPPER(last_name) = 'KHORSHAT') -- to avoid updating another id to given customer's info
 RETURNING *;
 
 -- 
