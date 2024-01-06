@@ -1,0 +1,120 @@
+1) 
+----film_in_stock and film_not_in_stock----
+Both functions return a set of inventory IDs for films in or not in stock at a specified store. They rely on the inventory_in_stock function to determine whether an item is in stock or not.
+
+----get_customer_balance----
+This function calculates a customer's balance considering rental fees, overdue fees, and payments made. It should return the net balance based on the parameters provided.
+
+----inventory_in_stock----
+Checks if an inventory item is in stock based on rental data. Returns a boolean indicating whether the inventory item is available.
+
+----inventory_held_by_customer----
+Retrieves the customer ID holding a particular inventory item based on the rental table.
+
+----rewards_report----
+This function appears to generate a report of customers meeting certain purchase criteria within the last month. Creates and uses a temporary table to store customer IDs meeting specified purchase conditions. Retrieves customer information based on the temporary table's content.
+
+----last_day----
+Determines the last day of a given timestamp's month.
+
+2) 
+CREATE OR REPLACE FUNCTION REWARDS_REPORT(MIN_MONTHLY_PURCHASES INTEGER, MIN_DOLLAR_AMOUNT_PURCHASED NUMERIC)
+RETURNS SETOF CUSTOMER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $FUNCTION$
+DECLARE
+    LAST_MONTH_START DATE;
+    LAST_MONTH_END DATE;
+    RR RECORD;
+BEGIN
+    IF MIN_MONTHLY_PURCHASES = 0 THEN
+        RAISE EXCEPTION 'MINIMUM MONTHLY PURCHASES PARAMETER MUST BE > 0';
+    END IF;
+
+    IF MIN_DOLLAR_AMOUNT_PURCHASED = 0.00 THEN
+        RAISE EXCEPTION 'MINIMUM MONTHLY DOLLAR AMOUNT PURCHASED PARAMETER MUST BE > $0.00';
+    END IF;
+
+    LAST_MONTH_START := CURRENT_DATE - INTERVAL '3 MONTH';
+    LAST_MONTH_START := DATE_TRUNC('MONTH', LAST_MONTH_START);
+
+    -- CONSTRUCTING SQL DYNAMICALLY TO FIND CUSTOMERS MEETING PURCHASE REQUIREMENTS
+    RETURN QUERY EXECUTE '
+        SELECT C.*
+        FROM CUSTOMER C
+        JOIN (
+            SELECT P.CUSTOMER_ID
+            FROM PAYMENT P
+            WHERE P.PAYMENT_DATE >= $1::DATE - INTERVAL ''1 MONTH''
+            GROUP BY P.CUSTOMER_ID
+            HAVING COUNT(DISTINCT DATE_TRUNC(''MONTH'', P.PAYMENT_DATE)) >= $2
+            AND SUM(P.AMOUNT) >= $3
+        ) SUB
+        ON C.CUSTOMER_ID = SUB.CUSTOMER_ID
+    ' USING LAST_MONTH_START, MIN_MONTHLY_PURCHASES, MIN_DOLLAR_AMOUNT_PURCHASED;
+
+END
+$FUNCTION$;
+
+3) 
+Function ---add_em--- seems a bit redundant and potentially unnecessary in the database. It is a SQL function that performs addition and returns the result. However, SQL already has arithmetic operators to handle addition, and the function doesn't seem to give any advantage or unique functionality.
+
+4)
+CREATE OR REPLACE FUNCTION GET_CUSTOMER_BALANCE2(P_CUSTOMER_ID INTEGER, P_EFFECTIVE_DATE TIMESTAMP WITH TIME ZONE)
+ RETURNS NUMERIC
+ LANGUAGE plpgsql
+AS $FUNCTION$
+DECLARE
+    V_RENTFEES DECIMAL(5,2) := 0; -- RENTAL FEES INITIALLY SET TO 0
+    V_OVERFEES DECIMAL(5,2) := 0; -- OVERDUE FEES INITIALLY SET TO 0
+    V_PAYMENTS DECIMAL(5,2) := 0; -- PAYMENTS INITIALLY SET TO 0
+BEGIN
+    -- CALCULATE RENTAL FEES FOR PREVIOUS RENTALS
+    SELECT COALESCE(SUM(FILM.RENTAL_RATE), 0)
+    INTO V_RENTFEES
+    FROM FILM
+    INNER JOIN INVENTORY ON FILM.FILM_ID = INVENTORY.FILM_ID
+    INNER JOIN RENTAL ON INVENTORY.INVENTORY_ID = RENTAL.INVENTORY_ID
+    WHERE RENTAL.RENTAL_DATE <= P_EFFECTIVE_DATE
+      AND RENTAL.CUSTOMER_ID = P_CUSTOMER_ID;
+
+    -- CALCULATE OVERDUE FEES FOR PRIOR RENTALS
+    SELECT COALESCE(SUM(
+            CASE 
+                WHEN (RENTAL.RETURN_DATE - RENTAL.RENTAL_DATE) > (FILM.RENTAL_DURATION * INTERVAL '1 DAY')
+                THEN EXTRACT(EPOCH FROM (RENTAL.RETURN_DATE - RENTAL.RENTAL_DATE - (FILM.RENTAL_DURATION * INTERVAL '1 DAY'))) / 86400 -- CALCULATE OVERDUE DAYS
+                ELSE 0
+            END
+        ), 0)
+    INTO V_OVERFEES
+    FROM RENTAL
+    INNER JOIN INVENTORY ON RENTAL.INVENTORY_ID = INVENTORY.INVENTORY_ID
+    INNER JOIN FILM ON INVENTORY.FILM_ID = FILM.FILM_ID
+    WHERE RENTAL.RENTAL_DATE <= P_EFFECTIVE_DATE
+      AND RENTAL.CUSTOMER_ID = P_CUSTOMER_ID;
+
+    -- CALCULATE PAYMENTS MADE PREVIOUSLY
+    SELECT COALESCE(SUM(PAYMENT.AMOUNT), 0)
+    INTO V_PAYMENTS
+    FROM PAYMENT
+    WHERE PAYMENT.PAYMENT_DATE <= P_EFFECTIVE_DATE
+      AND PAYMENT.CUSTOMER_ID = P_CUSTOMER_ID;
+
+    RETURN V_RENTFEES + V_OVERFEES - V_PAYMENTS;
+END
+$FUNCTION$;
+
+5)
+These function are custom functions for concatenating strings across rows because in PostgreSQL there is no such built-in functions like in MySQL.
+--group_concat: aggregates strings from multiple rows into a single string. It concatenates values from a column across multiple rows and groups them based on a specified condition or column
+--_group_concat: helper function used by group_concat.
+
+Also, these functions are used within the context of views (nicer_but_slower_film_list, film_list, actor_info). They are employed to aggregate actor names and film titles across different tables (actor, film, film_actor, category) to display information in a specific format.
+
+6)
+--last_updated: used as a trigger to update the last_update column of a table with the current timestamp whenever a new row is inserted or updated in the table. It is created as a trigger for every table in database. For example, CREATE TRIGGER last_updated BEFORE UPDATE ON table_name FOR EACH ROW EXECUTE PROCEDURE last_updated();
+
+7) 
+--tmpSQL is used to store a dynamically generated SQL query(EXECUTE). It is possible to leave the function as a static statement, so that it may improve performance and security, but if the function at first aims for dynamic changes of query structure then it is not preferrable to cut off EXECUTE statement.
+
