@@ -58,7 +58,7 @@ END
 $FUNCTION$;
 
 3) 
-Function ---add_em--- seems a bit redundant and potentially unnecessary in the database. It is a SQL function that performs addition and returns the result. However, SQL already has arithmetic operators to handle addition, and the function doesn't seem to give any advantage or unique functionality.
+I could not find any function that can be removed from dvdrental database since all function seems reasonably. I doubted about last_day but this also seems helpful function in specific cases
 
 4)
 CREATE OR REPLACE FUNCTION GET_CUSTOMER_BALANCE2(P_CUSTOMER_ID INTEGER, P_EFFECTIVE_DATE TIMESTAMP WITH TIME ZONE)
