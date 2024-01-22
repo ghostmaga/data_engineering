@@ -1,6 +1,7 @@
-﻿DROP 
+DROP 
   DATABASE IF EXISTS recruitment_agency_db;
 CREATE database recruitment_agency_db;
+
 CREATE SCHEMA IF NOT EXISTS rec_agency;
 SET 
   search_path TO rec_agency;
@@ -10,7 +11,8 @@ DROP
   COLUMN IF EXISTS degree;
 DROP 
   TYPE IF EXISTS degree_types;
--- Define ENUM type for Degree typesCREATE TYPE degree_types AS enum (
+-- Define ENUM type for Degree types
+CREATE TYPE degree_types AS enum (
     'HIGH SCHOOL', 
     'ASSOCIATE', 
     'BACHELOR', 
@@ -152,7 +154,7 @@ CREATE TABLE IF NOT EXISTS service_skill (
 CREATE TABLE IF NOT EXISTS institution (
   institution_id serial PRIMARY KEY, 
   name VARCHAR(255) NOT NULL, 
-  website VARCHAR(255) CHECK (website ~ * 'https://') --check for website to contain valid secured URL
+  website VARCHAR(255) CHECK (website ILIKE 'https://%') --check for website to contain valid secured URL
 );
 CREATE TABLE IF NOT EXISTS candidate_education (
   education_id serial PRIMARY KEY, candidate_id INT, 
@@ -793,7 +795,7 @@ FROM
           FROM 
             location 
           WHERE 
-            upper(address_line1) LIKE '132 MAIN ST' 
+            upper(address_line1) LIKE '123 MAIN ST' 
           limit 
             1
         )
@@ -1215,7 +1217,7 @@ SELECT
   * 
 FROM 
   (
-    VALUES 
+    VALUES
       (
         (
           SELECT 
