@@ -1,6 +1,17 @@
 ﻿SET ROLE postgres;
 SET search_path TO public;
 
+DROP POLICY IF EXISTS customer_policy_rental ON rental;
+DROP POLICY IF EXISTS customer_policy_payment ON payment;
+
+ALTER TABLE rental DISABLE ROW LEVEL SECURITY;
+ALTER TABLE payment DISABLE ROW LEVEL SECURITY;
+
+-- TASK 2 --
+
+-- 1 --
+-- Create a new user with the username "rentaluser" and the password "rentalpassword". 
+-- Give the user the ability to connect to the database but no other permissions.
 DO $$ 
 BEGIN 
   IF NOT EXISTS (SELECT 1 FROM pg_user WHERE usename = 'rentaluser') THEN
@@ -9,12 +20,16 @@ BEGIN
   END IF;
 END $$;
 
+-- 2 --
+-- Grant "rentaluser" SELECT permission for the "customer" table
 GRANT SELECT ON TABLE customer TO rentaluser;
 
 SET ROLE rentaluser;
-
+-- Сheck to make sure this permission works correctly—write a SQL query to select all customers
 SELECT * FROM customer c;
 
+-- 3 --
+-- Create a new user group called "rental" and add "rentaluser" to the group. 
 SET ROLE postgres;
 
 DO $$ 
@@ -22,79 +37,161 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_group WHERE groname = 'rental') THEN
     CREATE GROUP rental;
   END IF;
+  EXCEPTION
+		WHEN OTHERS THEN 
+			RAISE NOTICE 'Error occured. %', SQLERRM;
 END $$;
 
 DO $$ 
 BEGIN 
-  IF NOT EXISTS (SELECT 1 FROM pg_user WHERE usename = 'rentaluser' AND usesysid = ANY (SELECT grosysid FROM pg_group WHERE groname = 'rental')) THEN
-	ALTER GROUP rental ADD USER rentaluser;
+  IF NOT EXISTS (
+    SELECT 1 
+    FROM pg_user 
+    WHERE usename = 'rentaluser' 
+    AND (
+    	SELECT ARRAY(	
+    		SELECT grosysid 
+    		FROM pg_group 
+    		WHERE groname = 'rental'
+    	) @> ARRAY[usesysid]
+    )
+  ) THEN
+    	ALTER GROUP rental ADD USER rentaluser;
   END IF;
 END $$;
 
---SELECT * FROM pg_group
---select * from pg_user
-
---SELECT ROLNAME 
---FROM PG_USER
---JOIN PG_AUTH_MEMBERS 
---ON (PG_USER.USESYSID=PG_AUTH_MEMBERS.MEMBER)
---JOIN PG_ROLES 
---ON (PG_ROLES.OID=PG_AUTH_MEMBERS.ROLEID)
---WHERE PG_USER.USENAME='RENTALUSER';
-
+-- 4 --
+-- Grant the "rental" group INSERT and UPDATE permissions for the "rental" table
 GRANT SELECT, INSERT, UPDATE ON TABLE rental TO GROUP rental;
 GRANT USAGE ON rental_rental_id_seq TO GROUP rental;
 SET ROLE rentaluser;
 
---INSERT INTO rental (rental_date, inventory_id, customer_id, staff_id)
---SELECT * 
---FROM 	(
---			VALUES ('2005-05-26 01:54:33.000 +0600'::timestamptz, 1, 1, 1)
---		) AS rnt(rental_date, iid, cid, sid)
---WHERE NOT EXISTS (SELECT 1 FROM rental WHERE rental_date = rnt.rental_date AND inventory_id = rnt.iid AND customer_id = rnt.cid);
+-- Insert a new row and update one existing row in the "rental" table under that role
+DO $$
+BEGIN
+	BEGIN
+		INSERT INTO rental (rental_date, inventory_id, customer_id, staff_id)
+		SELECT * FROM 	(
+			VALUES 
+				('2005-05-26 01:54:33.000 +0600'::timestamptz, 1, 1, 1)
+		) AS rnt(rental_date, iid, cid, sid)
+		WHERE NOT EXISTS (
+			SELECT 1 
+			FROM rental 
+			WHERE rental_date = rnt.rental_date 
+			AND inventory_id = rnt.iid 
+			AND customer_id = rnt.cid
+		);
+	EXCEPTION
+		WHEN OTHERS THEN 
+			RAISE NOTICE 'Error occured. %', SQLERRM;
+	END;
+END $$;
 
---REVOKE ALL ON ALL TABLES IN SCHEMA public FROM rentaluser;
---REVOKE ALL ON ALL TABLES IN SCHEMA public FROM group rental;
-
+-- 5 --
+-- Revoke the "rental" group's INSERT permission for the "rental" table
 SET ROLE postgres;
 REVOKE INSERT ON TABLE rental FROM GROUP rental;
 
+-- Try to insert new rows into the "rental" table make sure this action is denied.
+SET ROLE rental;
+DO $$
+BEGIN 
+	BEGIN 
+		INSERT INTO rental (rental_date, inventory_id, customer_id, return_date, staff_id)
+		VALUES ('2005-05-26 01:54:33.000 +0600', 1526, 460, '2005-05-29 22:40:33.000 +0600', 2);
+	EXCEPTION
+		WHEN OTHERS THEN 
+			RAISE NOTICE 'Error occured. %', SQLERRM;
+	END;
+END $$;
+
+-- 6 --
+SET ROLE postgres;
+-- Create a personalized role for any customer already existing in the dvd_rental database. 
+-- The name of the role name must be client_{first_name}_{last_name} (omit curly brackets). 
+-- The customer's payment and rental history must not be empty. 
+
 DO $$ 
-BEGIN 
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE upper(rolname) = 'CLIENT_MARY_SMITH') THEN
-	CREATE ROLE client_mary_smith;
-  END IF;
-END $$;
-
-ALTER TABLE rental ENABLE ROW LEVEL SECURITY;
-ALTER TABLE payment ENABLE ROW LEVEL SECURITY;
+DECLARE
+    fname TEXT;
+    lname TEXT;
+    role_name TEXT;
+BEGIN
+	BEGIN 
+    -- Step 1: Choose a customer with non-empty payment and rental history
+		SELECT 
+	       first_name, 
+	       last_name 
+	   INTO 
+	       fname, 
+	       lname 
+	   FROM 
+	       customer 
+	   WHERE 
+	       customer_id IN (
+	       	SELECT DISTINCT customer_id 
+	         FROM payment
+	       )
+	   AND customer_id IN (
+	         SELECT DISTINCT customer_id 
+	         FROM rental
+	   )
+	   LIMIT 1;
 	
-DO $$ --FOR testing purposes I GRANTED ONLY SELECT TO CHECK whether it will display ONLY customer's DATA OR not
-BEGIN 
-  IF NOT EXISTS (SELECT 1 FROM pg_user WHERE usename = 'mary_smith') THEN
-    CREATE USER mary_smith WITH PASSWORD '123';
-    GRANT CONNECT ON DATABASE dvdrental TO mary_smith;
-    GRANT SELECT ON TABLE rental TO mary_smith; 
-  END IF;
+	    -- Step 2: Check if the role already exists
+	    role_name := 'client_' || fname || '_' || lname;
+	    
+	   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+	        -- Step 3: Create the role
+	      EXECUTE 'CREATE ROLE ' || role_name;
+	      EXECUTE 'GRANT CONNECT ON DATABASE dvdrental TO ' || role_name;
+	      EXECUTE 'GRANT USAGE ON SCHEMA public TO ' || role_name;
+--	      EXECUTE 'GRANT SELECT ON TABLE customer TO ' || role_name;  
+	      RAISE NOTICE 'Personalized role % has been created.', role_name;
+	   ELSE
+	   	RAISE NOTICE 'Role % already exists.', role_name;
+	   END IF;
+	   
+	   EXCEPTION
+         WHEN NO_DATA_FOUND THEN
+         	RAISE NOTICE 'No customer found satisfying the criteria';
+         WHEN OTHERS THEN 
+            RAISE NOTICE 'Error occurred: %', SQLERRM;
+	END;
 END $$;
 
-CREATE TABLE IF NOT EXISTS users (
-    user_id SERIAL PRIMARY KEY,
-    customer_id INT NOT NULL REFERENCES customer,
-    role_name VARCHAR(50) UNIQUE NOT NULL
-);
+-- TASK 3 --
+ALTER TABLE rental ENABLE ROW LEVEL SECURITY; -- by default it is disabled
+ALTER TABLE payment ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS customer_policy ON rental;
-DROP POLICY IF EXISTS customer_policy ON payment;
+--FOR testing purposes
+GRANT SELECT ON TABLE customer TO client_mary_smith;	
+GRANT SELECT, UPDATE, INSERT ON TABLE rental TO client_mary_smith; 
+GRANT SELECT ON TABLE payment TO client_mary_smith; 
 
-CREATE POLICY customer_policy
-ON rental
-USING (customer_id = (SELECT customer_id FROM users WHERE role_name = current_user));
+-- Restrict access to the 'customer' table
+REVOKE SELECT ON TABLE customer FROM public;
 
-CREATE POLICY customer_policy
-ON payment
-USING (customer_id = (SELECT customer_id FROM users WHERE role_name = current_user));
+-- Create a RLS policy on the 'rental' table
+CREATE POLICY customer_policy_rental
+	ON rental
+   USING (customer_id = (
+   	SELECT customer_id 
+    	FROM customer 
+    	WHERE first_name = substring((SELECT rolname FROM pg_roles WHERE rolname = 'client_mary_smith') from 'client_(.*?)_') 
+    	AND last_name = substring((SELECT rolname FROM pg_roles WHERE rolname = 'client_mary_smith') from '_([^_]+)$')
+	));
 
-SET ROLE mary_smith;
+-- Create a RLS policy on the 'payment' table
+CREATE POLICY customer_policy_payment
+	ON payment
+   USING (customer_id = (
+   	SELECT customer_id 
+    	FROM customer 
+    	WHERE (first_name) = upper(substring((SELECT rolname FROM pg_roles WHERE rolname = 'client_mary_smith') from 'client_(.*?)_')) 
+    	AND upper(last_name) = upper(substring((SELECT rolname FROM pg_roles WHERE rolname = 'client_mary_smith') from '_([^_]+)$'))
+	));
 
+SET ROLE client_mary_smith;
 SELECT * FROM rental;

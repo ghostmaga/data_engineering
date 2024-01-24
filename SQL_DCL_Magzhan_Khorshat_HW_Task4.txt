@@ -8,7 +8,7 @@ Views:
 Create views that include only the columns users should have access to. Users can then query the view instead of the underlying table.
 
 Row-Level Security (RLS):
-RLS policies can be defined to filter rows based on certain conditions, effectively restricting access to specific columns for certain users or roles.
+RLS policies can be defined to filter rows based on certain conditions, effectively restricting access to specific rows for certain users or roles.
 
 2. What is the difference between user identification and user authentication?
 
