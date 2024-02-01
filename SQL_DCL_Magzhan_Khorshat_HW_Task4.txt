@@ -7,9 +7,6 @@ PostgreSQL allows you to grant specific privileges on individual columns. You ca
 Views:
 Create views that include only the columns users should have access to. Users can then query the view instead of the underlying table.
 
-Row-Level Security (RLS):
-RLS policies can be defined to filter rows based on certain conditions, effectively restricting access to specific rows for certain users or roles.
-
 2. What is the difference between user identification and user authentication?
 
 --User Identification is the process of uniquely identifying a user in a system. It involves associating a user with a unique identifier, often a username or user ID. The identification process is essential for distinguishing one user from another.
