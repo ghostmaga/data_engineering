@@ -58,54 +58,53 @@ SELECT * FROM get_sales_revenue_by_category_qtr('2017-04-01');
 CREATE OR REPLACE FUNCTION most_popular_films_by_countries(countries TEXT[])
 RETURNS TABLE (country TEXT, film_title TEXT, film_rating MPAA_RATING, film_language bpchar(20), film_length INT2, film_release_year "year") AS
 $$
-DECLARE
-    country_count INT;
 BEGIN
-	 -- Check if there's at least one country in the input array
-    IF array_length(countries, 1) IS NULL OR array_length(countries, 1) = 0 THEN
-        RAISE NOTICE 'No countries provided.';
+    -- Check if the input array is empty
+    IF array_length(countries, 1) IS NULL THEN
+        RAISE NOTICE 'Empty array provided';
+        RETURN;
     END IF;
 
-    -- Use a loop to iterate over each country in the input array
-    FOR i IN 1..array_length(countries, 1) LOOP
-        -- Check if the country is valid (exists in the database)
-        SELECT COUNT(*) INTO country_count
-        FROM COUNTRY c
-        WHERE UPPER(c.country) = UPPER(countries[i]);
+    -- Check if any of the countries are invalid (do not exist in the database)
+    IF EXISTS (
+        SELECT 1
+        FROM unnest(countries) AS country_name
+        LEFT JOIN country c ON UPPER(c.country) = UPPER(country_name)
+        WHERE c.country_id IS NULL
+    ) THEN
+        RAISE NOTICE 'Invalid countries provided.';
+        RETURN;
+    END IF;
 
-        IF country_count = 0 THEN
-            RAISE NOTICE 'Invalid country: %, not exists in the database', countries[i];
-        END IF;
-    END LOOP;
     RETURN QUERY
-    SELECT DISTINCT ON (c2.country)
-        c2.country,
+    SELECT DISTINCT ON (co.country)
+        co.country,
         f.title AS film_title,
         f.rating AS film_rating,
         l.name AS film_language,
         f.length AS film_length,
         f.release_year AS film_release_year
     FROM
-        FILM f
-        INNER JOIN INVENTORY i ON f.FILM_ID = i.FILM_ID
+        film f
+        INNER JOIN inventory i ON f.film_id = i.film_id
         INNER JOIN rental r ON i.inventory_id = r.inventory_id
-        INNER JOIN store s ON i.STORE_ID = s.STORE_ID
-        INNER JOIN ADDRESS a ON s.ADDRESS_ID = a.ADDRESS_ID
-        INNER JOIN CITY c ON a.CITY_ID = c.CITY_ID
-        INNER JOIN COUNTRY c2 ON c.COUNTRY_ID = c2.COUNTRY_ID
-        INNER JOIN "language" l ON f.language_id = l.language_id
+        INNER JOIN customer cu ON r.customer_id = cu.customer_id
+        INNER JOIN address a ON cu.address_id = a.address_id
+        INNER JOIN city ci ON a.city_id = ci.city_id
+        INNER JOIN country co ON ci.country_id = co.country_id
+        INNER JOIN language l ON f.language_id = l.language_id
     WHERE
-        UPPER(c2.country) IN (SELECT UPPER(unnest) FROM unnest(countries))
+        UPPER(co.country) IN (SELECT UPPER(unnest) FROM unnest(countries))
     GROUP BY
-        c2.country, f.title, f.rating, l.name, f.length, f.release_year
+        co.country, f.title, f.rating, l.name, f.length, f.release_year
     ORDER BY
-        c2.country, COUNT(*) DESC;  -- order by country and count
+        co.country, COUNT(*) DESC;  -- order by country and count
 END;
 $$
 LANGUAGE 'plpgsql';
 
 -- TEST CALL
-SELECT * FROM most_popular_films_by_countries(array['AUSTRALIA','CANADA','UNITED STATES']);
+SELECT * FROM most_popular_films_by_countries(array['AUSTRALIA','CANADA','UNITED STATES']::TEXT[]);
 
 --Task 4
 --Create a function that generates a list of movies available in stock based on a partial title match 
@@ -115,13 +114,14 @@ CREATE OR REPLACE FUNCTION FILMS_IN_STOCK_BY_TITLE(PARTIAL_TITLE TEXT)
 RETURNS TABLE (ROW_NUM INTEGER, FILM_TITLE TEXT, FILM_LANGUAGE BPCHAR(20), CUSTOMER_NAME TEXT, RENTAL_DATE TEXT) AS
 $$
 BEGIN
-	 -- HANDLES THE CASE WHEN NO MOVIES ARE FOUND MATCHING THE TITLE PATTERN
-	 IF NOT EXISTS (
+	 -- Check if movies are found but none are in stock
+    IF NOT EXISTS (
         SELECT 1 
         FROM FILM
-        WHERE FILM.TITLE ILIKE PARTIAL_TITLE
+        LEFT JOIN INVENTORY ON FILM.FILM_ID = INVENTORY.FILM_ID
+        WHERE FILM.TITLE ILIKE PARTIAL_TITLE AND INVENTORY_IN_STOCK(INVENTORY.INVENTORY_ID)
     ) THEN
-    	  RAISE NOTICE 'MOVIES WITH THE SPECIFIED TITLE PATTERN NOT FOUND IN STOCK.';
+        RAISE NOTICE 'NONE ARE IN STOCK';
         RETURN;
     END IF;
    
@@ -147,16 +147,6 @@ BEGIN
         AND INVENTORY_IN_STOCK(INVENTORY.INVENTORY_ID) -- CHECK IF THE INVENTORY IS IN STOCK
     ORDER BY 
         FILM.FILM_ID, RENTAL.RENTAL_DATE DESC NULLS LAST;
-    
-    -- Check if movies are found but none are in stock
-    IF NOT EXISTS (
-        SELECT 1 
-        FROM FILM
-        LEFT JOIN INVENTORY ON FILM.FILM_ID = INVENTORY.FILM_ID
-        WHERE FILM.TITLE ILIKE PARTIAL_TITLE AND INVENTORY_IN_STOCK(INVENTORY.INVENTORY_ID)
-    ) THEN
-        RAISE NOTICE 'FOUND MOVIES WITH THE SPECIFIED TITLE PATTERN, BUT NONE ARE IN STOCK.';
-    END IF;
    
 END;
 $$
@@ -189,20 +179,20 @@ BEGIN
     IF NOT FOUND THEN
         -- INSERT THE NEW LANGUAGE INTO THE LANGUAGE TABLE
         INSERT INTO LANGUAGE (NAME) VALUES (MOVIE_LANGUAGE) RETURNING LANGUAGE_ID INTO LANG_ID;
+        RAISE NOTICE 'ADDED THE NEW LANGUAGE %', MOVIE_LANGUAGE;
     END IF;
-
-    -- INSERT THE NEW MOVIE INTO THE FILM TABLE
-    INSERT INTO FILM (film_id, TITLE, RELEASE_YEAR, LANGUAGE_ID, RENTAL_RATE, RENTAL_DURATION, REPLACEMENT_COST)
-    SELECT * FROM (VALUES (nextval('film_film_id_seq'), MOVIE_TITLE, RELEASE_YEAR, LANG_ID, 4.99, 3, 19.99)) AS NEWF(FILM_ID, TITLE, RELEASE_YEAR, LANGUAGE_ID, RENTAL_RATE, RENTAL_DURATION, REPLACEMENT_COST)
-    WHERE NOT EXISTS (SELECT 1 FROM FILM WHERE UPPER(FILM.TITLE) = UPPER(NEWF.TITLE));
-    
-    -- HANDLE EXCEPTION QUIETLY IF ANY
-    EXCEPTION
-        WHEN OTHERS THEN
-            RAISE NOTICE 'ERROR INSERTING THE MOVIE: %', SQLERRM;
-            RETURN;
+   
+    IF NOT EXISTS (
+    	SELECT 1 FROM FILM WHERE UPPER(FILM.TITLE) = UPPER(MOVIE_TITLE)
+    ) THEN 
+		    INSERT INTO FILM (TITLE, RELEASE_YEAR, LANGUAGE_ID, RENTAL_RATE, RENTAL_DURATION, REPLACEMENT_COST)
+		    SELECT * FROM (VALUES (MOVIE_TITLE, RELEASE_YEAR, LANG_ID, 4.99, 3, 19.99)) AS NEWF(TITLE, RELEASE_YEAR, LANGUAGE_ID, RENTAL_RATE, RENTAL_DURATION, REPLACEMENT_COST);
+		    --WHERE NOT EXISTS (SELECT 1 FROM FILM WHERE UPPER(FILM.TITLE) = UPPER(NEWF.TITLE));
+	      	RAISE NOTICE 'SUCCESSFULLY ADDED NEW FILM "%" INTO FILM TABLE', MOVIE_TITLE;
+    	ELSE RAISE NOTICE 'FILM "%" IS ALREADY IN THE TABLE', MOVIE_TITLE;
+    END IF;
 END;
 $$ LANGUAGE 'plpgsql';
 
 -- TEST CALL
-SELECT * FROM NEW_MOVIE('DASTUR', 2024, 'Kazakh');
+SELECT * FROM NEW_MOVIE('QA4', 2023, 'Kaz');
