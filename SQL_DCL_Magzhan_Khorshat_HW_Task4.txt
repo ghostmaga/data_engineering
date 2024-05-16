@@ -1,0 +1,46 @@
+﻿1. How can one restrict access to certain columns of a database table?
+Restricting access to certain columns of a database table can be achieved through various mechanisms:
+
+Column Privileges:
+PostgreSQL allows you to grant specific privileges on individual columns. You can use the GRANT and REVOKE statements to control who has access to read or modify specific columns.
+
+Views:
+Create views that include only the columns users should have access to. Users can then query the view instead of the underlying table.
+
+2. What is the difference between user identification and user authentication?
+
+--User Identification is the process of uniquely identifying a user in a system. It involves associating a user with a unique identifier, often a username or user ID. The identification process is essential for distinguishing one user from another.
+
+--User authentication is the process of verifying the claimed identity of a user. It ensures that the user is who they claim to be by validating their credentials, such as a password, token, or certificate. Authentication is a crucial step in granting access to a system or resource.
+
+In summary, user identification focuses on assigning a unique label to each user, while user authentication verifies the legitimacy of the user's claimed identity.
+
+3. What are the recommended authentication protocols for PostgreSQL?
+PostgreSQL supports various authentication methods, and the recommended choice depends on security requirements and deployment scenarios:
+
+Password Authentication:
+Users authenticate using a password stored in the PostgreSQL database. It's suitable for many scenarios but requires secure handling of passwords.
+
+LDAP (Lightweight Directory Access Protocol):
+LDAP integration allows PostgreSQL to authenticate users against an LDAP directory. This is beneficial for organizations managing user identities centrally.
+
+Kerberos:
+Kerberos provides secure authentication using a ticket-based system. It's suitable for environments where a Kerberos infrastructure is in place.
+
+Certificate Authentication:
+PostgreSQL supports SSL/TLS certificate-based authentication, ensuring secure communication between the client and server.
+
+SCRAM (Salted Challenge Response Authentication Mechanism):
+SCRAM is a modern authentication protocol designed to improve security over password-based methods by using a challenge-response mechanism.
+
+4. What is proxy authentication in PostgreSQL, and what is it for? Why does it make the previously discussed role-based access control easier to implement?
+
+Proxy authentication in PostgreSQL refers to a mechanism where a user, typically a superuser or a user with specific privileges, can connect to the database on behalf of another user without revealing the latter's credentials. This is achieved using the SET ROLE command.
+
+Proxy authentication simplifies the implementation of RBAC. An admin role can connect to the database and set the role to a user-specific role, allowing for a seamless switch between roles.
+
+It enables more granular control over user permissions. Administrators can manage access at the role level and temporarily elevate privileges as needed.
+
+Since the actual users don't directly connect to the database, their credentials are not exposed during connection. This reduces the risk associated with password-based authentication.
+
+Administrators can elevate privileges for specific tasks without permanently altering a user's role. This ensures that users only have elevated privileges when necessary.
